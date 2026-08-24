@@ -27,7 +27,7 @@
     "README.md"
   ],
   "peerDependencies": {
-    "@simeonradivoev/gameflow-sdk": "^1.7.0",
+    "@simeonradivoev/gameflow-sdk": "^1.8.0",
     "typescript": "^5"
   },
   "scripts": {
