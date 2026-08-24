@@ -1,7 +1,7 @@
 {
   "name": "@simeonradivoev/gameflow-itch",
   "displayName": "itch.io Web Games",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Discover, add, and play curated itch.io HTML5 games in Gameflow.",
   "repository": {
     "type": "git",
