@@ -7,6 +7,9 @@
     "type": "git",
     "url": "https://github.com/simeonradivoev/gameflow-itch"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "dist/index.js",
   "category": "sources",
@@ -32,7 +35,7 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit --skipLibCheck",
     "prepublishOnly": "bun run test && bun run build",
-    "publish": "bun publish --access public"
+    "release": "bun publish --access public"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
