@@ -3,6 +3,10 @@
   "displayName": "itch.io Web Games",
   "version": "0.1.0",
   "description": "Discover, add, and play curated itch.io HTML5 games in Gameflow.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simeonradivoev/gameflow-itch"
+  },
   "type": "module",
   "main": "dist/index.js",
   "category": "sources",
@@ -27,7 +31,8 @@
     "build": "bunx gameflow-build",
     "test": "bun test",
     "typecheck": "tsc --noEmit --skipLibCheck",
-    "prepublishOnly": "bun run test && bun run build"
+    "prepublishOnly": "bun run test && bun run build",
+    "publish": "bun publish --access public"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
