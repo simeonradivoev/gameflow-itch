@@ -1,0 +1,39 @@
+{
+  "name": "@simeonradivoev/gameflow-itch",
+  "displayName": "itch.io Web Games",
+  "version": "0.1.0",
+  "description": "Discover, add, and play curated itch.io HTML5 games in Gameflow.",
+  "type": "module",
+  "main": "dist/index.js",
+  "category": "sources",
+  "icon": "https://static.itch.io/images/itchio-textless-white.svg",
+  "keywords": [
+    "gameflow-plugin",
+    "gameflow",
+    "itch.io",
+    "html5",
+    "webgl",
+    "web-games"
+  ],
+  "files": [
+    "dist/**/*",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@simeonradivoev/gameflow-sdk": "^1.7.0",
+    "typescript": "^5"
+  },
+  "scripts": {
+    "build": "bunx gameflow-build",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit --skipLibCheck",
+    "prepublishOnly": "bun run test && bun run build"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
