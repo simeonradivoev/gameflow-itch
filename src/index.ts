@@ -3,11 +3,73 @@ import type { DownloadInfo, DownloadLookupDetails, DownloadLookupEntry, FrontEnd
 import z from 'zod';
 import pkg from '../package.json';
 import { ItchClient } from './client';
-import { decodeGameId } from './parser';
+import { butlerError, ButlerPluginError, ButlerService, type ButlerUploadSet } from './butler/service';
+import type { Profile, Upload } from './butler/messages';
+import { decodeGameId, encodeGameId } from './parser';
 import type { ItchGame, ItchListing } from './types';
 
 const DEFAULT_COLLECTION = 'https://itch.io/c/8025379/gameflow-store';
 const WEB_PLATFORM_LOGO = 'https://static.itch.io/images/itchio-textless-white.svg';
+const API_KEYS_URL = 'https://itch.io/user/settings/api-keys';
+const WEB_DOWNLOAD_ID = 'web';
+
+type PluginAction = {
+    id: string;
+    title?: string;
+    description?: string;
+    action: string;
+    status?: string;
+    fields?: Array<{
+        id: string;
+        label?: string;
+        description?: string;
+        placeholder?: string;
+        type: 'text' | 'password';
+        required: boolean;
+        maxLength: number;
+    }>;
+};
+
+function profileName (profile: Profile)
+{
+    return profile.user?.displayName?.trim() || profile.user?.username?.trim() || `profile ${profile.id}`;
+}
+
+export function itchAccountActions (profile?: Profile, statusError?: string): PluginAction[]
+{
+    const help: PluginAction = {
+        id: 'itch-api-key-help',
+        title: 'itch.io API key',
+        description: 'Create or manage the API key used for this one-time connection.',
+        action: 'Open itch.io'
+    };
+    if (profile)
+    {
+        return [{
+            id: 'itch-disconnect',
+            title: 'itch.io account',
+            description: `Remove every itch.io login saved in Gameflow's private Butler database.`,
+            action: 'Disconnect',
+            status: `Connected as ${profileName(profile)}`
+        }, help];
+    }
+    return [{
+        id: 'itch-connect',
+        title: 'itch.io account',
+        description: 'Paste an itch.io API key. Gameflow sends it directly to the local Butler daemon and does not save or log it.',
+        action: 'Connect',
+        status: statusError ?? 'Not connected',
+        fields: [{
+            id: 'apiKey',
+            label: 'API key',
+            description: 'The key is used only for this request. Butler saves the resulting login session.',
+            placeholder: 'itch.io API key',
+            type: 'password',
+            required: true,
+            maxLength: 4096
+        }]
+    }, help];
+}
 
 const SettingsSchema = z.object({
     collectionUrl: z.url().default(DEFAULT_COLLECTION).describe('Public itch.io collection shown alongside games in the Gameflow store').meta({ title: 'Collection URL' }),
@@ -91,21 +153,170 @@ function toGameLookup (game: ItchGame): GameLookup
     };
 }
 
+function uploadSystemSlug (upload: Upload)
+{
+    if (upload.platforms.windows) return 'win';
+    if (upload.platforms.linux) return 'linux';
+    if (upload.platforms.osx) return 'macos';
+    return process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'macos' : 'linux';
+}
+
+export function toButlerDownloadInfo (game: ItchGame, upload: Upload): DownloadInfo
+{
+    const systemSlug = uploadSystemSlug(upload);
+    return {
+        id: String(upload.id),
+        name: game.name,
+        summary: game.summary,
+        source_id: game.id,
+        system_slug: systemSlug,
+        slug: new URL(game.pageUrl).pathname.split('/').filter(Boolean).at(-1),
+        coverUrl: game.coverUrl ?? '',
+        screenshotUrls: game.screenshots,
+        files: [],
+        platform: { source: pkg.name, id: systemSlug, slug: systemSlug, name: systemSlug },
+        metadata: {
+            genres: game.genres,
+            companies: game.authors,
+            game_modes: [],
+            age_ratings: [],
+            itchUpload: { id: upload.id, name: upload.displayName || upload.filename, filename: upload.filename, size: upload.size }
+        }
+    };
+}
+
+export function toWebDownloadInfo (game: ItchGame): DownloadInfo
+{
+    return {
+        id: WEB_DOWNLOAD_ID,
+        name: game.name,
+        summary: game.summary,
+        source_id: game.id,
+        system_slug: 'web',
+        slug: new URL(game.pageUrl).pathname.split('/').filter(Boolean).at(-1),
+        coverUrl: game.coverUrl ?? '',
+        screenshotUrls: game.screenshots,
+        files: [],
+        platform: { source: pkg.name, id: 'web', slug: 'web', name: 'Web' },
+        metadata: {
+            genres: game.genres,
+            companies: game.authors,
+            game_modes: [],
+            age_ratings: [],
+            itchUpload: { id: WEB_DOWNLOAD_ID, name: 'Web version' }
+        }
+    };
+}
+
+export function toDownloadLookupFile (game: ItchGame, upload: Upload)
+{
+    return {
+        id: String(upload.id),
+        format: upload.displayName || upload.filename || 'itch.io upload',
+        mtime: null,
+        size: Number.isFinite(upload.size) ? upload.size : null,
+        download_url: game.pageUrl
+    };
+}
+
+export function webDownloadLookupFile (game: ItchGame)
+{
+    return {
+        id: WEB_DOWNLOAD_ID,
+        format: 'HTML5 — play in Gameflow',
+        mtime: game.updatedAt ?? null,
+        size: null,
+        download_url: game.pageUrl
+    };
+}
+
 export default class ItchPlugin implements PluginType<Settings>
 {
     settingsSchema = SettingsSchema;
     private client = new ItchClient();
+    private butler?: ButlerService;
+    private butlerDownloadPath?: string;
+    private butlerTransition: Promise<void> = Promise.resolve();
+    private getDownloadPath?: () => string;
+
+    private async getButler (downloadPath: string)
+    {
+        let service: ButlerService | undefined;
+        const transition = this.butlerTransition.then(async () =>
+        {
+            if (this.butler && this.butlerDownloadPath === downloadPath)
+            {
+                service = this.butler;
+                return;
+            }
+
+            const previous = this.butler;
+            this.butler = undefined;
+            this.butlerDownloadPath = undefined;
+            if (previous) await previous.cleanup();
+
+            service = new ButlerService(downloadPath);
+            this.butler = service;
+            this.butlerDownloadPath = downloadPath;
+        });
+        this.butlerTransition = transition.catch(() => {});
+        await transition;
+        return service!;
+    }
 
     async load (ctx: PluginLoadingContextType<Settings>)
     {
+        this.getDownloadPath = () => ctx.app.config.get('downloadPath');
         const getGame = (id: string) => this.client.game(decodeGameId(id));
+        const getCollection = async () =>
+        {
+            const collectionUrl = ctx.config.get('collectionUrl');
+            let collectionId: number | undefined;
+            try
+            {
+                const match = new URL(collectionUrl).pathname.match(/^\/c\/(\d+)(?:\/|$)/);
+                const parsed = Number(match?.[1]);
+                if (Number.isSafeInteger(parsed)) collectionId = parsed;
+            } catch {}
+
+            if (collectionId)
+            {
+                try
+                {
+                    const games = await (await this.getButler(ctx.app.config.get('downloadPath')))
+                        .collectionGames(collectionId, ctx.config.get('collectionLimit'));
+                    if (games)
+                    {
+                        return games.flatMap(game =>
+                        {
+                            if (!game.url || !game.title) return [];
+                            const pageUrl = new URL(game.url);
+                            if (pageUrl.protocol !== 'https:' || !pageUrl.hostname.endsWith('.itch.io')) return [];
+                            return [{
+                                id: encodeGameId(pageUrl.href),
+                                itchId: String(game.id),
+                                pageUrl: pageUrl.href,
+                                name: game.title,
+                                coverUrl: game.coverUrl,
+                                summary: undefined,
+                                author: undefined,
+                                genre: undefined,
+                                web: false
+                            } satisfies ItchListing];
+                        });
+                    }
+                } catch {}
+            }
+
+            return this.client.collection(collectionUrl);
+        };
 
         ctx.hooks.games.fetchGames.tapPromise(pkg.name, async ({ query, games }) =>
         {
             if (query.source !== 'store' || query.collection_source || query.collection_id) return;
 
             const search = query.search?.trim().toLocaleLowerCase();
-            const collection = (await this.client.collection(ctx.config.get('collectionUrl')))
+            const collection = (await getCollection())
                 .slice(0, ctx.config.get('collectionLimit'))
                 .filter(game => !search
                     || game.name.toLocaleLowerCase().includes(search)
@@ -134,34 +345,113 @@ export default class ItchPlugin implements PluginType<Settings>
             if (game.web) return toDetailedGame(game);
         });
 
-        ctx.hooks.games.fetchDownloads.tapPromise(pkg.name, async ({ source, id }) =>
+        ctx.hooks.games.fetchDownloads.tapPromise(pkg.name, async ({ source, id, downloadId }) =>
         {
             if (source !== pkg.name) return;
             const game = await getGame(id);
-            if (!game.web || !game.embedUrl || !game.coverUrl) return;
-            return [{
-                id: game.id,
-                name: game.name,
-                summary: game.summary,
-                source_id: game.id,
-                system_slug: 'web',
-                slug: new URL(game.pageUrl).pathname.split('/').filter(Boolean).at(-1),
-                coverUrl: game.coverUrl,
-                screenshotUrls: game.screenshots,
-                files: [],
-                platform: { source: pkg.name, id: 'web', slug: 'web', name: 'Web' },
-                metadata: {
-                    genres: game.genres,
-                    companies: game.authors,
-                    game_modes: [],
-                    age_ratings: []
-                }
-            } satisfies DownloadInfo];
+            const webDownloads = game.web ? [toWebDownloadInfo(game)] : [];
+            if (downloadId === WEB_DOWNLOAD_ID) return webDownloads;
+            if (!game.itchId) return downloadId ? [] : webDownloads;
+            const itchId = Number(game.itchId);
+            if (!Number.isSafeInteger(itchId)) return downloadId ? [] : webDownloads;
+            let result: ButlerUploadSet;
+            try
+            {
+                result = await (await this.getButler(ctx.app.config.get('downloadPath'))).getUploads(itchId);
+            } catch (error)
+            {
+                if (webDownloads.length && !downloadId) return webDownloads;
+                throw error;
+            }
+            const downloads = result.uploads.map(upload => toButlerDownloadInfo(game, upload));
+            const available = [...webDownloads, ...downloads];
+            return downloadId ? available.filter(download => download.id === downloadId) : available;
         });
 
-        ctx.hooks.games.buildLaunchCommands.tapPromise({ name: pkg.name, before: 'com.simeonradivoev.gameflow.es' }, async ({ source, sourceId }) =>
+        const performInstall = (ctx.hooks.games as typeof ctx.hooks.games & {
+            performInstall: { tapPromise: (name: string, handler: (install: {
+                source: string;
+                id: string;
+                downloadId?: string;
+                info: DownloadInfo;
+                downloadPath: string;
+                abortSignal?: AbortSignal;
+                updateProgress: (progress: number) => void;
+            }) => Promise<{ info: DownloadInfo; files: string[]; } | undefined>) => void; };
+        }).performInstall;
+        if (!performInstall) throw new Error('The itch.io download integration requires a Gameflow SDK with games.performInstall support');
+        performInstall.tapPromise(pkg.name, async ({ source, id, downloadId, info, downloadPath, abortSignal, updateProgress }) =>
+        {
+            if (source !== pkg.name) return;
+            const game = await getGame(id);
+            if ((downloadId ?? info.id) === WEB_DOWNLOAD_ID)
+            {
+                if (!game.web) throw new Error('This itch.io game does not provide a browser version');
+                updateProgress(100);
+                return { info: toWebDownloadInfo(game), files: [] };
+            }
+            const itchId = Number(game.itchId);
+            if (!Number.isSafeInteger(itchId)) throw new Error('This itch.io page does not expose a numeric game ID required by Butler');
+            const uploadId = Number(downloadId ?? info.id);
+            if (!Number.isSafeInteger(uploadId)) throw new Error('Invalid itch.io upload ID: ' + (downloadId ?? info.id));
+            const installed = await (await this.getButler(downloadPath)).install(itchId, uploadId, abortSignal, updateProgress)
+                .catch(error => { throw butlerError('Could not install itch.io game', error); });
+            return {
+                info: {
+                    ...info,
+                    path_fs: installed.relativePath,
+                    metadata: {
+                        ...info.metadata,
+                        itchUpload: { ...info.metadata?.itchUpload, id: installed.upload.id, caveId: installed.caveId }
+                    }
+                },
+                files: [installed.path]
+            };
+        });
+
+        const performUninstall = (ctx.hooks.games as typeof ctx.hooks.games & {
+            performUninstall?: { tapPromise: (name: string, handler: (uninstall: {
+                source: string;
+                id: string;
+                gamePath: string | null;
+                downloadPath: string;
+            }) => Promise<boolean | undefined>) => void; };
+        }).performUninstall;
+        if (!performUninstall) throw new Error('The itch.io download integration requires a Gameflow SDK with games.performUninstall support');
+        performUninstall.tapPromise(pkg.name, async ({ source, id, gamePath, downloadPath }) =>
+        {
+            if (source !== pkg.name) return;
+            if (!gamePath) return true;
+            const game = await getGame(id);
+            const itchId = Number(game.itchId);
+            if (!Number.isSafeInteger(itchId))
+                throw new ButlerPluginError('This installed itch.io game has no valid Butler game ID');
+            try
+            {
+                await (await this.getButler(downloadPath)).uninstall(itchId, gamePath);
+                return true;
+            } catch (error)
+            {
+                throw butlerError('Could not uninstall itch.io game', error);
+            }
+        });
+
+        ctx.hooks.games.buildLaunchCommands.tapPromise({ name: pkg.name, before: 'com.simeonradivoev.gameflow.es' }, async ({ source, sourceId, gamePath }) =>
         {
             if (source !== pkg.name || !sourceId) return;
+            if (gamePath)
+            {
+                const game = await getGame(sourceId);
+                const itchId = Number(game.itchId);
+                if (!Number.isSafeInteger(itchId)) return new ButlerPluginError('This installed itch.io game has no valid Butler game ID');
+                try
+                {
+                    return await (await this.getButler(ctx.app.config.get('downloadPath'))).launchCommands(itchId, gamePath);
+                } catch (error)
+                {
+                    return butlerError('Could not prepare the itch.io game for launch', error);
+                }
+            }
             const game = await getGame(sourceId);
             if (!game.embedUrl) return;
             return [{
@@ -172,8 +462,8 @@ export default class ItchPlugin implements PluginType<Settings>
                 launchType: 'web',
                 emulator: 'ITCH-WEB',
                 emulatorSource: 'embedded',
-                metadata: { webUrl: game.embedUrl }
-            }];
+                metadata: { webUrl: game.embedUrl } as any
+            }] as import('@simeonradivoev/gameflow-sdk/shared').CommandEntry[];
         });
 
         ctx.hooks.games.platformLookup.tapPromise(pkg.name, async ({ slug }) =>
@@ -197,9 +487,11 @@ export default class ItchPlugin implements PluginType<Settings>
 
             const listings = search
                 ? await this.client.search(search, page ?? 1)
-                : await this.client.collection(ctx.config.get('collectionUrl'));
+                : await getCollection();
             const limit = rows ?? 20;
-            const items = listings.slice(0, limit).map(toDownloadEntry);
+            // Search is paged remotely; collections are fetched as a single list.
+            const offset = search ? 0 : ((page ?? 1) - 1) * limit;
+            const items = listings.slice(offset, offset + limit).map(toDownloadEntry);
             matches.set(pkg.name, { count: items.length, items });
             return matches;
         });
@@ -208,6 +500,19 @@ export default class ItchPlugin implements PluginType<Settings>
         {
             if (source !== pkg.name) return;
             const game = await getGame(id);
+            const files: DownloadLookupDetails['files'] = game.web ? [webDownloadLookupFile(game)] : [];
+            const itchId = Number(game.itchId);
+            if (Number.isSafeInteger(itchId))
+            {
+                try
+                {
+                    const result = await (await this.getButler(ctx.app.config.get('downloadPath'))).getUploads(itchId);
+                    files.push(...result.uploads.map(upload => toDownloadLookupFile(game, upload)));
+                } catch (error)
+                {
+                    if (!game.web) throw error;
+                }
+            }
             return {
                 source: pkg.name,
                 id: game.id,
@@ -215,7 +520,7 @@ export default class ItchPlugin implements PluginType<Settings>
                 name: game.name,
                 summary: game.summary,
                 date: game.updatedAt,
-                files: [],
+                files,
                 game_id: { source: pkg.name, id: game.id }
             } satisfies DownloadLookupDetails;
         });
@@ -239,8 +544,53 @@ export default class ItchPlugin implements PluginType<Settings>
         });
     }
 
+    async getEventsNames ()
+    {
+        if (!this.getDownloadPath) return itchAccountActions(undefined, 'Plugin is not loaded');
+        try
+        {
+            const profile = await (await this.getButler(this.getDownloadPath())).profileStatus();
+            return itchAccountActions(profile);
+        } catch (error)
+        {
+            const message = error instanceof Error ? error.message : 'Unable to check itch.io login';
+            return itchAccountActions(undefined, message);
+        }
+    }
+
+    async onEvent (id: string, values?: unknown)
+    {
+        if (id === 'itch-api-key-help') return { openTab: API_KEYS_URL };
+        if (!this.getDownloadPath) throw new ButlerPluginError('The itch.io plugin is not loaded');
+        const butler = await this.getButler(this.getDownloadPath());
+        if (id === 'itch-connect')
+        {
+            const apiKey = values && typeof values === 'object' && 'apiKey' in values && typeof values.apiKey === 'string'
+                ? values.apiKey
+                : '';
+            await butler.loginWithAPIKey(apiKey);
+            return { reload: true };
+        }
+        if (id === 'itch-disconnect')
+        {
+            await butler.logout();
+            return { reload: true };
+        }
+        throw new ButlerPluginError(`Unknown itch.io action: ${id}`);
+    }
+
     async cleanup ()
     {
         this.client.clear();
+        const transition = this.butlerTransition.then(async () =>
+        {
+            const butler = this.butler;
+            this.butler = undefined;
+            this.butlerDownloadPath = undefined;
+            if (butler) await butler.cleanup();
+        });
+        this.butlerTransition = transition.catch(() => {});
+        await transition;
+        this.getDownloadPath = undefined;
     }
 }

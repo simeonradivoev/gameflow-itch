@@ -1,8 +1,8 @@
 {
   "name": "@simeonradivoev/gameflow-itch",
-  "displayName": "itch.io Web Games",
-  "version": "0.1.1",
-  "description": "Discover, add, and play curated itch.io HTML5 games in Gameflow.",
+  "displayName": "itch.io",
+  "version": "0.2.0",
+  "description": "Discover, download, install, and play itch.io games in Gameflow.",
   "repository": {
     "type": "git",
     "url": "https://github.com/simeonradivoev/gameflow-itch"
@@ -20,14 +20,16 @@
     "itch.io",
     "html5",
     "webgl",
-    "web-games"
+    "web-games",
+    "butler",
+    "game-downloads"
   ],
   "files": [
     "dist/**/*",
     "README.md"
   ],
   "peerDependencies": {
-    "@simeonradivoev/gameflow-sdk": "^1.8.0",
+    "@simeonradivoev/gameflow-sdk": "^1.10.0",
     "typescript": "^5"
   },
   "scripts": {
@@ -38,7 +40,9 @@
     "release": "bun publish --access public"
   },
   "dependencies": {
+    "@itchio/butlerd": "^15.0.0",
     "cheerio": "^1.2.0",
+    "node-stream-zip": "^1.16.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
