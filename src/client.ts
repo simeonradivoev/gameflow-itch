@@ -38,7 +38,7 @@ export class ItchClient
     {
         const url = new URL(collectionUrl);
         if (url.protocol !== 'https:' || url.hostname !== 'itch.io') throw new Error('Collection must be a public itch.io URL');
-        return this.cached(`collection:${url.href}`, async () => parseListings(await this.getHtml(url.href)).filter(game => game.web));
+        return this.cached(`collection:${url.href}`, async () => parseListings(await this.getHtml(url.href)));
     }
 
     search (query: string, page = 1): Promise<ItchListing[]>
@@ -47,7 +47,7 @@ export class ItchClient
         url.searchParams.set('q', query);
         url.searchParams.set('type', 'games');
         if (page > 1) url.searchParams.set('page', String(page));
-        return this.cached(`search:${url.href}`, async () => parseListings(await this.getHtml(url.href)).filter(game => game.web));
+        return this.cached(`search:${url.href}`, async () => parseListings(await this.getHtml(url.href)));
     }
 
     game (pageUrl: string): Promise<ItchGame>

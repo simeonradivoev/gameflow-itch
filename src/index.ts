@@ -91,9 +91,9 @@ function toDetailedGame (game: ItchGame): FrontEndGameTypeDetailed
         slug: new URL(game.pageUrl).pathname.split('/').filter(Boolean).at(-1) ?? game.id,
         name: game.name,
         platform_id: null,
-        platform_slug: 'web',
-        platform_display_name: 'Web',
-        path_platform_cover: WEB_PLATFORM_LOGO,
+        platform_slug: game.web ? 'web' : null,
+        platform_display_name: game.web ? 'Web' : 'Download',
+        path_platform_cover: game.web ? WEB_PLATFORM_LOGO : null,
         paths_screenshots: game.screenshots,
         igdb_id: null,
         ra_id: null,
@@ -149,7 +149,7 @@ function toGameLookup (game: ItchGame): GameLookup
         average_rating: undefined,
         keywords: game.tags,
         igdb_id: undefined,
-        platforms: [{ id: 0, name: 'Web', displayName: 'Web', slug: 'web' }]
+        platforms: game.web ? [{ id: 0, name: 'Web', displayName: 'Web', slug: 'web' }] : []
     };
 }
 
@@ -326,7 +326,7 @@ export default class ItchPlugin implements PluginType<Settings>
             const limit = query.limit ?? 50;
             const listings = collection.slice(offset, offset + limit);
             const settled = await Promise.allSettled(listings.map(game => this.client.game(game.pageUrl)));
-            const itchGames = settled.filter((result): result is PromiseFulfilledResult<ItchGame> => result.status === 'fulfilled' && result.value.web)
+            const itchGames = settled.filter((result): result is PromiseFulfilledResult<ItchGame> => result.status === 'fulfilled')
                 .map(result => toDetailedGame(result.value));
 
             if (query.genres?.length)
@@ -342,7 +342,7 @@ export default class ItchPlugin implements PluginType<Settings>
         {
             if (source !== pkg.name) return;
             const game = await getGame(id);
-            if (game.web) return toDetailedGame(game);
+            return toDetailedGame(game);
         });
 
         ctx.hooks.games.fetchDownloads.tapPromise(pkg.name, async ({ source, id, downloadId }) =>
