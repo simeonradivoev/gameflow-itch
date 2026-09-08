@@ -1,7 +1,7 @@
 {
   "name": "@simeonradivoev/gameflow-itch",
   "displayName": "itch.io",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Discover, download, install, and play itch.io games in Gameflow.",
   "repository": {
     "type": "git",
@@ -29,7 +29,7 @@
     "README.md"
   ],
   "peerDependencies": {
-    "@simeonradivoev/gameflow-sdk": "^1.10.0",
+    "@simeonradivoev/gameflow-sdk": "^1.9.0",
     "typescript": "^5"
   },
   "scripts": {
