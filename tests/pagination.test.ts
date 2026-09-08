@@ -13,7 +13,7 @@ test('unfiltered download pages exhaust the itch collection without repeating it
         web: true
     } satisfies ItchListing));
     const state = plugin as unknown as { client: { collection: () => Promise<ItchListing[]>; }; };
-    state.client.collection = async () => listings;
+    state.client.collection = async () => [...listings, listings[0]!, listings[1]!];
     type Lookup = (matches: Map<string, { count: number; items: unknown[]; }>,
         query: { page: number; rows: number; }) => Promise<Map<string, { count: number; items: unknown[]; }>>;
     let lookup: Lookup | undefined;
@@ -38,7 +38,7 @@ test('unfiltered download pages exhaust the itch collection without repeating it
         const result = await lookup!(new Map([['other', other]]), { page, rows: 5 });
         expect(result.get('other')).toBe(other);
         const own = result.get(pkg.name)!;
-        expect(own.count).toBe(own.items.length);
+        expect(own.count).toBe(13);
         pages.push(own.items);
     }
     expect(pages.map(page => page.length)).toEqual([5, 5, 3, 0, 0]);

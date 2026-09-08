@@ -485,14 +485,20 @@ export default class ItchPlugin implements PluginType<Settings>
                 return matches;
             }
 
-            const listings = search
+            const results = search
                 ? await this.client.search(search, page ?? 1)
                 : await getCollection();
+            const listings = Array.from(new Map(results.map(game => [game.id, game])).values());
             const limit = rows ?? 20;
             // Search is paged remotely; collections are fetched as a single list.
             const offset = search ? 0 : ((page ?? 1) - 1) * limit;
             const items = listings.slice(offset, offset + limit).map(toDownloadEntry);
-            matches.set(pkg.name, { count: items.length, items });
+            // Collection totals are stable across pages. Search has no reported
+            // total, so allow another page while the remote page is full.
+            const count = search
+                ? ((page ?? 1) - 1) * limit + items.length + (items.length === limit ? 1 : 0)
+                : listings.length;
+            matches.set(pkg.name, { count, items });
             return matches;
         });
 
