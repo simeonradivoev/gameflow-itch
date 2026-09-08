@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import path from 'node:path';
+import pkg from '../package.json';
 import fs from 'node:fs/promises';
 import { spyOn } from 'bun:test';
 import { butlerPlatform } from '../src/butler/binary';
@@ -34,7 +35,7 @@ describe('Butler daemon startup', () =>
         expect(args).toEqual([
             `--dbpath=${path.join('state', 'itch', 'butler.db')}`,
             '--address=https://itch.io',
-            '--user-agent=@simeonradivoev/gameflow-itch/0.2.0',
+            `--user-agent=${pkg.name}/${pkg.version}`,
             '--destiny-pid=1234'
         ]);
         expect(args.every(argument => argument.includes('='))).toBeTrue();
