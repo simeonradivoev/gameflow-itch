@@ -29,3 +29,4 @@ bun run build
 ```
 
 The default curated collection is <https://itch.io/c/8025379/gameflow-store>. It can be changed from the plugin settings page. Hosted HTML5 games continue to launch inside Gameflow; downloaded games fall through to Gameflow's local launch-command discovery.
+Mixed-platform uploads (for example, one archive containing both Windows and Linux builds) are labeled for the host OS when supported. Native itch launch targets are checked before UMU, including for existing installations previously labeled Windows. On Linux, Windows targets are excluded from native selection; if no native target is available, Gameflow can fall back to UMU. This does not require redownloading an existing mixed-platform installation.

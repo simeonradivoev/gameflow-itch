@@ -153,12 +153,15 @@ function toGameLookup (game: ItchGame): GameLookup
     };
 }
 
-function uploadSystemSlug (upload: Upload)
+export function uploadSystemSlug (upload: Upload, platform: NodeJS.Platform = process.platform)
 {
+    if (platform === 'linux' && upload.platforms.linux) return 'linux';
+    if (platform === 'darwin' && upload.platforms.osx) return 'macos';
+    if (platform === 'win32' && upload.platforms.windows) return 'win';
     if (upload.platforms.windows) return 'win';
     if (upload.platforms.linux) return 'linux';
     if (upload.platforms.osx) return 'macos';
-    return process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'macos' : 'linux';
+    return platform === 'win32' ? 'win' : platform === 'darwin' ? 'macos' : 'linux';
 }
 
 export function toButlerDownloadInfo (game: ItchGame, upload: Upload): DownloadInfo
@@ -436,7 +439,7 @@ export default class ItchPlugin implements PluginType<Settings>
             }
         });
 
-        ctx.hooks.games.buildLaunchCommands.tapPromise({ name: pkg.name, before: 'com.simeonradivoev.gameflow.es' }, async ({ source, sourceId, gamePath }) =>
+        ctx.hooks.games.buildLaunchCommands.tapPromise({ name: pkg.name, before: 'com.simeonradivoev.gameflow.umu', stage: -200 }, async ({ source, sourceId, gamePath }) =>
         {
             if (source !== pkg.name || !sourceId) return;
             if (gamePath)
@@ -446,7 +449,8 @@ export default class ItchPlugin implements PluginType<Settings>
                 if (!Number.isSafeInteger(itchId)) return new ButlerPluginError('This installed itch.io game has no valid Butler game ID');
                 try
                 {
-                    return await (await this.getButler(ctx.app.config.get('downloadPath'))).launchCommands(itchId, gamePath);
+                    const commands = await (await this.getButler(ctx.app.config.get('downloadPath'))).launchCommands(itchId, gamePath, { nativeOnly: process.platform === 'linux' });
+                    return commands.length ? commands : undefined;
                 } catch (error)
                 {
                     return butlerError('Could not prepare the itch.io game for launch', error);

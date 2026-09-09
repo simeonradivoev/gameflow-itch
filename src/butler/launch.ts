@@ -33,6 +33,14 @@ function openCommand (target: string, platform: NodeJS.Platform): string[]
 
 const helperNamePattern = /^(?:unitycrashhandler(?:32|64)?|crashpad_handler|crashhandler|bugreport|unins\d*|uninstall|updater|setup|installer|vcredist(?:_x(?:64|86))?|dxsetup)(?:\.exe)?$/i;
 
+/** Windows binaries in a mixed upload must not preempt a native Linux entry point. */
+export function isLinuxLaunchTarget(target: LaunchTarget)
+{
+    const flavor = target.strategy.candidate?.flavor ?? '';
+    return !/windows|macos/i.test(flavor)
+        && !/\.(exe|com|bat|cmd|app)$/i.test(target.strategy.fullTargetPath);
+}
+
 export function isHelperLaunchTarget (target: LaunchTarget)
 {
     if (target.strategy.strategy !== 'native') return false;
@@ -66,7 +74,7 @@ export function chooseFallbackNativeCandidate (
             if (helperNamePattern.test(entry.name)) return false;
             if (platform === 'win32') return entry.isFile && /\.exe$/i.test(entry.name);
             if (platform === 'darwin') return entry.isDirectory && /\.app$/i.test(entry.name);
-            return entry.isFile && Boolean(entry.executable);
+            return entry.isFile && Boolean(entry.executable) && !/\.(exe|com|bat|cmd)$/i.test(entry.name);
         })
         .map(entry =>
         {

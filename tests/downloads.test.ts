@@ -68,3 +68,13 @@ describe('itch.io download choices', () =>
         });
     });
 });
+
+test('multi-platform uploads prefer the host platform while Windows-only uploads stay Windows', async () =>
+{
+    const { uploadSystemSlug } = await import('../src');
+    const mixed = { ...upload, platforms: { windows: true, linux: true, osx: true } };
+    expect(uploadSystemSlug(mixed, 'linux')).toBe('linux');
+    expect(uploadSystemSlug(mixed, 'win32')).toBe('win');
+    expect(uploadSystemSlug(mixed, 'darwin')).toBe('macos');
+    expect(uploadSystemSlug(upload, 'linux')).toBe('win');
+});

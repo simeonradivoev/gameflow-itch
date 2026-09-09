@@ -141,3 +141,15 @@ describe('Butler launch target mapping', () =>
         ], cave('C:\\Games\\druids-haven'), 'win32')).toBeUndefined();
     });
 });
+
+test('mixed Linux uploads exclude Windows targets even when they are executable', async () =>
+{
+    const { isLinuxLaunchTarget } = await import('../src/butler/launch');
+    expect(isLinuxLaunchTarget(target('native', '/games/diffusion/game.exe'))).toBe(false);
+    expect(isLinuxLaunchTarget(target('native', '/games/diffusion/game', { strategy: { strategy: 'native', fullTargetPath: '/games/diffusion/game', candidate: { flavor: 'windows' } } }))).toBe(false);
+    expect(isLinuxLaunchTarget(target('native', '/games/diffusion/Diffusion.AppImage'))).toBe(true);
+    expect(chooseFallbackNativeCandidate([
+        { name: 'Diffusion.exe', isFile: true, isDirectory: false, executable: true },
+        { name: 'Diffusion.sh', isFile: true, isDirectory: false, executable: true }
+    ], cave('/games/Diffusion'), 'linux')?.name).toBe('Diffusion.sh');
+});

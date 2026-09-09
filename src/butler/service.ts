@@ -27,7 +27,7 @@ import {
     type Profile,
     type Upload
 } from './messages';
-import { chooseFallbackNativeCandidate, isHelperLaunchTarget, isPathInside, launchTargetToCommand, samePath } from './launch';
+import { chooseFallbackNativeCandidate, isHelperLaunchTarget, isLinuxLaunchTarget, isPathInside, launchTargetToCommand, samePath } from './launch';
 
 export class ButlerPluginError extends Error
 {
@@ -386,7 +386,7 @@ export class ButlerService
     }
 
 
-    async launchCommands (gameId: number, gamePath: string)
+    async launchCommands (gameId: number, gamePath: string, options: { nativeOnly?: boolean } = {})
     {
         const client = await this.start();
         const profile = this.activeProfile ?? await authenticateButler(client);
@@ -400,7 +400,7 @@ export class ButlerService
         if (!cave) throw new ButlerPluginError('Could not find the Butler installation record for this itch.io game');
 
         const result = await client.call(LaunchGetTargets, { caveId: cave.id }, ignoreButlerLogs);
-        let targets = result.targets.filter(target => !isHelperLaunchTarget(target));
+        let targets = result.targets.filter(target => !isHelperLaunchTarget(target) && (!options.nativeOnly || isLinuxLaunchTarget(target)));
         if (!targets.length)
         {
             const entries = await fs.readdir(cave.installInfo.installFolder, { withFileTypes: true });
@@ -433,6 +433,7 @@ export class ButlerService
             .filter((command): command is NonNullable<typeof command> => Boolean(command));
         if (!commands.length)
         {
+            if (options.nativeOnly) return []; // Let the host's Windows compatibility launcher try next.
             if (result.targets.some(isHelperLaunchTarget))
                 throw new ButlerPluginError('The itch.io installation contains only a crash/helper executable. Reinstall the game to restore its main executable.');
             throw new ButlerPluginError('This itch.io game does not expose a launch target Gameflow can open');

@@ -63,3 +63,32 @@ test('store, details, and downloads retain native-only titles without a Web labe
     expect(downloads.map((download: any) => download.id)).toEqual(['7']);
     expect(downloads[0].system_slug).toBe('win');
 });
+
+test('native itch launch runs before UMU and an empty native result permits fallback', async () =>
+{
+    const plugin = new ItchPlugin();
+    const state = plugin as unknown as {
+        client: { game: () => Promise<ItchGame> };
+        getButler: () => Promise<{ launchCommands: () => Promise<unknown[]> }>;
+    };
+    state.client.game = async () => native;
+    let commands: unknown[] = [{ id: 'native', command: ['/games/Diffusion.sh'], valid: true }];
+    state.getButler = async () => ({ launchCommands: async () => commands });
+    const handlers: Record<string, (...args: any[]) => any> = {};
+    const options: Record<string, any> = {};
+    const hooks = new Proxy({}, {
+        get: (_target, name) => ({ tapPromise: (opts: unknown, handler: (...args: any[]) => any) => {
+            handlers[String(name)] = handler;
+            options[String(name)] = opts;
+        } })
+    });
+    await plugin.load({ hooks: { games: hooks }, config: { get: () => '' },
+        app: { config: { get: () => 'unused' } } } as never);
+    expect(options.buildLaunchCommands.before).toContain('com.simeonradivoev.gameflow.umu');
+    expect(options.buildLaunchCommands.stage).toBeLessThan(-100);
+    const launch = { source: pkg.name, sourceId: native.id, gamePath: '/games/Diffusion', systemSlug: 'win' };
+    expect(await handlers.buildLaunchCommands!(launch)).toEqual(commands);
+    commands = [];
+    expect(await handlers.buildLaunchCommands!(launch)).toBeUndefined();
+    expect(await handlers.buildLaunchCommands!({ ...launch, source: 'other' })).toBeUndefined();
+});
