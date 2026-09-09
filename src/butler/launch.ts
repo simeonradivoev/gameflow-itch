@@ -138,7 +138,10 @@ export function launchTargetToCommand (
     const args = target.action.args ?? [];
     const wrapper = target.host.wrapper;
     let command: string[];
-    let startDir = installFolder;
+    // An AppImage may be nested below Butler's install root; sibling game data
+    // must resolve as it does when the AppImage is opened from its own folder.
+    let startDir = platform === 'linux' && /\.appimage$/i.test(fullTargetPath)
+        ? path.posix.dirname(fullTargetPath) : installFolder;
     let env: Record<string, string> | undefined;
 
     if (wrapper)

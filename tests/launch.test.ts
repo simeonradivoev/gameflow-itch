@@ -153,3 +153,10 @@ test('mixed Linux uploads exclude Windows targets even when they are executable'
         { name: 'Diffusion.sh', isFile: true, isDirectory: false, executable: true }
     ], cave('/games/Diffusion'), 'linux')?.name).toBe('Diffusion.sh');
 });
+
+test('nested AppImages launch beside their game data rather than the installation root', () =>
+{
+    const command = launchTargetToCommand(target('native', '/games/download/Diffusion/Diffusion-x86_64.AppImage'), cave('/games/download'), 0, 'linux');
+    expect(command?.startDir).toBe('/games/download/Diffusion');
+    expect(command?.command).toEqual(['/games/download/Diffusion/Diffusion-x86_64.AppImage', '--fullscreen']);
+});
